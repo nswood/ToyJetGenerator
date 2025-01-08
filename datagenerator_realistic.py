@@ -59,6 +59,7 @@ class jet_data_generator(object):
             if (x.mom.m > a[mid].mom.m and x.mom.p > 1) or  (x.mom.p >  a[mid].mom.p and x.mom.p < 1): hi = mid
             else: lo = mid+1
         a.insert(lo, x)
+        return lo
 
     def rotation_matrix(self,axis, theta):
         """
@@ -399,8 +400,6 @@ class jet_data_generator(object):
                 dau1 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000)
                 dau2 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000)
                 
-                #print("randomtheta: ", randomdraw_theta[0])
-                #print(dau1.mom.p_t[0], dau2.mom.p_t[0])
                 return dau1,dau2, -111.11, -111.11
         dau1_mom,dau2_mom=self.dau2(mother,rand_m1,randomdraw_theta,zrand,randomdraw_phi)
         dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)
@@ -545,15 +544,27 @@ class jet_data_generator(object):
 
 
         #print("squeeze",np.squeeze(np.array(arr)).shape, np.squeeze(np.array(zlist)).shape, np.squeeze(np.array(thetalist)).shape)
-        return np.squeeze(np.array(arr)), np.squeeze(np.array(zlist)), np.squeeze(np.array(thetalist))
-
+        return np.squeeze(np.array(arr)), np.squeeze(np.array(zlist)), np.squeeze(np.array(thetalist)),np.array(showered_list)
+    
     def generate_dataset(self, nevent):
 
         #output = torch.FloatTensor([])
-
-        data = np.empty([nevent, 3*self.nparticle], dtype=float)
-        data_z     = np.empty([nevent, self.nparticle-1], dtype=float)
-        data_theta = np.empty([nevent, self.nparticle-1], dtype=float)
+        
+#         data = np.empty([nevent, 3*self.nparticle], dtype=float)
+#         data_z     = np.empty([nevent, self.nparticle-1], dtype=float)
+#         data_theta = np.empty([nevent, self.nparticle-1], dtype=float)
+#         data_particles = np.empty([nevent, self.nparticle], dtype=object)
+                
+        data = np.empty([nevent], dtype=object)
+        data_z     = np.empty([nevent], dtype=object)
+        data_theta = np.empty([nevent], dtype=object)
+        data_particles = np.empty([nevent], dtype=object)
+        base_n_particle = self.nparticle
+#         data = []
+#         data_z = []
+#         data_theta = []
+#         data_particles = []
+        
         
         if self.doMultiprocess:
             pool = Pool(processes=self.ncore)
@@ -561,18 +572,31 @@ class jet_data_generator(object):
 
         else:
             for i in range(nevent):
-                if i % 10 == 0:
+                adj = 2*int(np.random.normal(0, int(0.1*base_n_particle)))
+                self.nparticle = base_n_particle + adj
+                if i % 100 == 0:
                     print("event :",i)
-                arr, arr_z, arr_theta = self.shower(i)    
-                data[i]  = np.squeeze(arr)
-                data_z[i] = np.squeeze(arr_z)
-                data_theta[i] = np.squeeze(arr_theta)
+                arr, arr_z, arr_theta, arr_particles = self.shower(i)    
+                data[i] = arr
+                data_z[i] = arr_z
+                data_theta[i] = arr_theta
+                data_particles[i] = arr_particles
+           
         
-
         #return output
-        return np.array(data), np.array(data_z), np.array(data_theta)
+        return data, data_z, data_theta, data_particles
+        
+        
+#         return np.array(data), np.array(data_z), np.array(data_theta), np.array(data_particles)
 
+    def mother_2_to_1(self,d1,d2):
+        # mother 4 vector: mo = d1 + d2
+        m0 = d1+d2
+        return m0
 
+    def softcombine(self,dau1,dau2):
+        mother_mom = self.mother_2_to_1(dau1.mom, dau2.mom)
+        mother = particle(mom=mother_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)
+        return mother
     #def visualize_one_event(self):
-
 
