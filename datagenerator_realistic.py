@@ -14,20 +14,22 @@ class particle:
     z: float
     m1: float
     m2: float
+    prong_label: int
+    part_label: int
+    part_parent_label: int
 
 class jet_data_generator(object):
     """    
     Input takes the following form. (massprior,quarkmass,nprong,nparticle)
     
     massprior : "signal" or "background" (signal to use Gaussian prior, backgroound for uniform)
-    quarkmass : mass of the quark in the showering
     nprong : number of particles after hard splitting
     nparticle: total number of particles after showering 
     
     Then use generate_dataset(N) to generate N number of events  
     
     """
-    def __init__(self, massprior, nprong, nparticle, doFixP,       doMultiprocess=False, ncore = 0):
+    def __init__(self, massprior, nprong, nparticle, doFixP, doMultiprocess=False, ncore = 0):
         super(jet_data_generator, self).__init__()
         self.massprior = massprior
         self.nprong = nprong
@@ -397,13 +399,13 @@ class jet_data_generator(object):
             mother.z=zrand
             mother.randtheta=randomdraw_theta
             if zrand == -1:
-                dau1 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000)
-                dau2 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000)
+                dau1 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
+                dau2 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
                 
                 return dau1,dau2, -111.11, -111.11
         dau1_mom,dau2_mom=self.dau2(mother,rand_m1,randomdraw_theta,zrand,randomdraw_phi)
-        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)
-        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)
+        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
+        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
         #print("dau1 m",dau1.mom,"dau2 m",dau2.mom)
         self.z.append(np.min([dau1.mom.p_t[0], dau2.mom.p_t[0]])/(dau1.mom.p_t[0]+dau2.mom.p_t[0]))
         self.zsoft.append(np.min([dau1.mom.p_t[0], dau2.mom.p_t[0]])/(dau1.mom.p_t[0]+dau2.mom.p_t[0]))
@@ -455,8 +457,8 @@ class jet_data_generator(object):
         dau2_mom = self.rotateTheta(dau2_mom,mother.mom.theta-np.pi/2)
         dau1_mom = self.rotatePhi(dau1_mom,mother.mom.phi)
         dau2_mom = self.rotatePhi(dau2_mom,mother.mom.phi)
-        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)
-        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)
+        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
+        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
         dau1.mom = dau1.mom.boost_particle(mother.mom)
         dau2.mom = dau2.mom.boost_particle(mother.mom)
         self.randtheta.append(randomdraw_theta)
@@ -482,7 +484,7 @@ class jet_data_generator(object):
         if self.doFixP:
             p = 400
         vec0 = Momentum4.m_eta_phi_p(m, 0, 0, p)
-        part = particle(mom=vec0,randtheta=-1000,z=-1000,m1=-1000,m2=-1000)  
+        part = particle(mom=vec0,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)  
         return part
 
     def hard_decays(self):
@@ -504,8 +506,19 @@ class jet_data_generator(object):
         return hardparticle_list, zlist, thetalist
 
     def genshower(self,_):
+        
+        # Hard decay until one partcle for each prong
         showered_list, zlist, thetalist = self.hard_decays()
-        total_particle = len(showered_list)        
+        
+        for i in range(len(showered_list)):
+            showered_list[i].prong_label = i
+            showered_list[i].part_label = i
+            showered_list[i].part_parent_label = -1
+        i += 1
+        
+
+        total_particle = len(showered_list)    
+        all_particles_list = []    
         while total_particle < self.nparticle:
             if showered_list[0].mom.p < 1:
                 break
@@ -514,7 +527,19 @@ class jet_data_generator(object):
             if dau1.z == -1:
                 break
             #print(dau1.mom,showered_list)
+            dau1.part_label = i
+            i += 1
+            dau2.part_label = i
+            i += 1
+
+            dau1.prong_label = showered_list[0].prong_label
+            dau2.prong_label = showered_list[0].prong_label
+            dau1.part_parent_label = showered_list[0].part_label
+            dau2.part_parent_label = showered_list[0].part_label
+            
+            all_particles_list.append(showered_list[0])
             showered_list.pop(0)
+            
             self.reverse_insort(showered_list, dau1)
             self.reverse_insort(showered_list, dau2)
             
@@ -522,15 +547,19 @@ class jet_data_generator(object):
             thetalist.append(theta)
             
             total_particle +=1
-        return total_particle, showered_list, zlist, thetalist
+        
+        for p in showered_list:
+            all_particles_list.append(p)
+
+        return total_particle, showered_list, zlist, thetalist, all_particles_list
     
     def shower(self,_):
         i=0
 
-        total_particle,showered_list,zlist, thetalist=self.genshower(i)
+        total_particle,showered_list,zlist, thetalist, all_particles_list=self.genshower(i)
         #print(total_particle, self.nparticle)
         while total_particle <  self.nparticle:
-            total_particle,showered_list,zlist, thetalist=self.genshower(i)
+            total_particle,showered_list,zlist, thetalist, all_particles_list=self.genshower(i)
         arr = []
 
         check = Momentum4(0,0,0,0)
@@ -544,7 +573,7 @@ class jet_data_generator(object):
 
 
         #print("squeeze",np.squeeze(np.array(arr)).shape, np.squeeze(np.array(zlist)).shape, np.squeeze(np.array(thetalist)).shape)
-        return np.squeeze(np.array(arr)), np.squeeze(np.array(zlist)), np.squeeze(np.array(thetalist)),np.array(showered_list)
+        return np.squeeze(np.array(arr)), np.squeeze(np.array(zlist)), np.squeeze(np.array(thetalist)),np.array(showered_list),np.array(all_particles_list)
     
     def generate_dataset(self, nevent):
 
@@ -559,6 +588,7 @@ class jet_data_generator(object):
         data_z     = np.empty([nevent], dtype=object)
         data_theta = np.empty([nevent], dtype=object)
         data_particles = np.empty([nevent], dtype=object)
+        data_shower_particles = np.empty([nevent], dtype=object)
         base_n_particle = self.nparticle
 #         data = []
 #         data_z = []
@@ -574,17 +604,18 @@ class jet_data_generator(object):
             for i in range(nevent):
                 adj = 2*int(np.random.normal(0, int(0.1*base_n_particle)))
                 self.nparticle = base_n_particle + adj
-                if i % 100 == 0:
+                if i % 10 == 0:
                     print("event :",i)
-                arr, arr_z, arr_theta, arr_particles = self.shower(i)    
+                arr, arr_z, arr_theta, arr_particles, shower_particles = self.shower(i)    
                 data[i] = arr
                 data_z[i] = arr_z
                 data_theta[i] = arr_theta
                 data_particles[i] = arr_particles
-           
+                data_shower_particles[i] = shower_particles
+         
         
         #return output
-        return data, data_z, data_theta, data_particles
+        return data, data_z, data_theta, data_particles, data_shower_particles
         
         
 #         return np.array(data), np.array(data_z), np.array(data_theta), np.array(data_particles)
