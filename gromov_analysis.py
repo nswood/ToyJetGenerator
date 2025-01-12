@@ -70,9 +70,12 @@ def process_datasets():
                         R = 1
                         dists = (energy_diffs * delta_R) / R
                         delta = delta_hyp(dists)
+                        diam = dists.max()
+                        rel_delta = (2 * delta) / diam
 
                         gromov_outputs.append({
                             'delta': delta.item(),
+                            'rel_delta': rel_delta.item(),
                             'n_parts': npts,
                             'n_prong': prong
                         })
@@ -101,7 +104,7 @@ def process_datasets_per_particle(all_k, n_parts,n_prong):
 
     for prong in n_prong:
         for npts in n_parts:
-            for file_id in range(25):
+            for file_id in range(25): 
                 filename = f"{output_folder}/dataset_nprong{prong}_nparts{npts}_{file_id}.pt"
                 if os.path.exists(filename):
                     print(filename)
@@ -143,7 +146,7 @@ def process_datasets_per_particle(all_k, n_parts,n_prong):
                         dists = (energy_diffs * delta_R) / R
                         delta = delta_hyp(dists)
                         for j in range(len(four_momentum_tensor)):
-                            n_parts = len(four_momentum_tensor)
+                            cur_n_parts = len(four_momentum_tensor)
 
                             for k in all_k:
                                 try: 
@@ -168,7 +171,8 @@ def process_datasets_per_particle(all_k, n_parts,n_prong):
                                         'selected_point_energy': selected_point[0].item(),
                                         'selected_point_eta': selected_point[1].item(),
                                         'selected_point_phi': selected_point[2].item(),
-                                        'num_parts': n_parts,
+                                        'num_parts': npts,
+                                        'final_state_num_parts': cur_n_parts,
                                         'num_prong': prong,
                                         'k': k,
                                         'delta': delta.item(),
@@ -212,7 +216,7 @@ def process_datasets_per_particle(all_k, n_parts,n_prong):
                         dists = (energy_diffs * delta_R) / R
                         delta = delta_hyp(dists)
                         for j in range(len(four_momentum_tensor)):
-                            n_parts = len(four_momentum_tensor)
+                            cur_n_parts = len(four_momentum_tensor)
 
                             for k in all_k:
                                 try: 
@@ -237,7 +241,8 @@ def process_datasets_per_particle(all_k, n_parts,n_prong):
                                         'selected_point_energy': selected_point[0].item(),
                                         'selected_point_eta': selected_point[1].item(),
                                         'selected_point_phi': selected_point[2].item(),
-                                        'num_parts': n_parts,
+                                        'num_parts': cur_n_parts,
+                                        'final_state_parts': npts,
                                         'num_prong': prong,
                                         'k': k,
                                         'delta': delta.item(),
@@ -260,15 +265,16 @@ def process_datasets_per_particle(all_k, n_parts,n_prong):
 
     
 # %%
-# output = process_datasets()
 all_k = [5,8,12]
 n_parts = [32,64]
 n_prong = [1,2,3,4]
+output = process_datasets()
 
 process_datasets_per_particle(all_k, n_parts,n_prong)
 # %%
-df = pd.DataFrame(output)
+# df = pd.DataFrame(output)
 
 # df.to_csv("per_particle_gromov_toy_data.csv", index=False)
+# df = pd.DataFrame(output)
 
-
+# df.to_csv("processed_gromov_toy_data.csv", index=False)
