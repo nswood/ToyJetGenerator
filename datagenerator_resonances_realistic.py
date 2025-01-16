@@ -17,23 +17,31 @@ class particle:
     prong_label: int
     part_label: int
     part_parent_label: int
+    resonance_origin: str  # Label for resonance origin
+
 
 class jet_data_generator(object):
-    """    
-    Input takes the following form. (massprior,quarkmass,nprong,nparticle)
-    
-    massprior : "signal" or "background" (signal to use Gaussian prior, backgroound for uniform)
-    nprong : number of particles after hard splitting
-    nparticle: total number of particles after showering 
-    
-    Then use generate_dataset(N) to generate N number of events  
-    
     """
-    def __init__(self, massprior, nprong, nparticle, doFixP, doMultiprocess=False, ncore = 0):
+    Input takes the following form.
+
+    massprior: "signal" or "background" (signal to use Gaussian prior, background for uniform)
+    nprong: number of particles after hard splitting
+    nparticle: total number of particles after showering
+
+    resonance_data: List of dictionaries, each defining a resonance:
+        {
+            'mass': float,  # Mass of the resonance
+            'relative_ratio': float,  # Relative ratio of occurrence
+            'decay_products': int  # Number of decay products
+        }
+
+    total_resonance_prob: float  # Total probability of any resonance occurring
+
+    """
+    def __init__(self, massprior, nprong, nparticle, doFixP, resonance_data, total_resonance_prob, doMultiprocess=False, ncore=0):
         super(jet_data_generator, self).__init__()
         self.massprior = massprior
         self.nprong = nprong
-        #self.quarkmass = quarkmass
         self.nparticle = nparticle
         self.zsoft = []
         self.zhard = []
@@ -42,6 +50,13 @@ class jet_data_generator(object):
         self.doFixP = doFixP
         self.doMultiprocess = doMultiprocess
         self.ncore = ncore
+
+        # Normalize resonance probabilities
+        total_ratio = sum(r['relative_ratio'] for r in resonance_data)
+        for r in resonance_data:
+            r['probability'] = (r['relative_ratio'] / total_ratio) * total_resonance_prob
+
+        self.resonance_data = resonance_data  # Store resonance configurations
 
     def reverse_insort(self, a, x, lo=0, hi=None):
         """Insert item x in list a, and keep it reverse-sorted assuming a
@@ -157,50 +172,6 @@ class jet_data_generator(object):
         dau1_mom = Momentum4(idau.e,v1rot[0],v1rot[1],v1rot[2])
         return dau1_mom
  
-    def softsplit_old(self, mother):
-        #Soft splitting performed in the rest frame of the mother, rotated, and then lorentz boosted back
-        #Soft Splitting prior: Gaussian around 0  
-        np.random.seed()
-        randomdraw_phi = np.random.uniform(0,2*np.pi)
-        randomdraw_theta=mother.randtheta
-        if randomdraw_theta == -1000:
-            _,randomdraw_theta=self.randmtheta(zmin=0.2/mother.mom.p,isize=1)
-        #sample next event
-        #dau1_m,randtheta1 = self.randmtheta(zmin=0.2/mother.mom.p,mmin=mother.mom.m/2/mother.mom.p,isize=1)
-        #dau2_m,randtheta2 = self.randmtheta(zmin=0.2/mother.mom.p,mmin=mother.mom.m/2/mother.mom.p,isize=1)
-        dau1_m,randtheta1 = self.randmtheta(zmin=0.2/mother.mom.p,mmin=1e-10,mmax=mother.mom.m/2/mother.mom.p,isize=1)
-        dau2_m,randtheta2 = self.randmtheta(zmin=0.2/mother.mom.p,mmin=1e-10,mmax=mother.mom.m/2/mother.mom.p,isize=1)
-        dau1_m = dau1_m[0]*mother.mom.p #mass was dimensionless in sampler
-        dau2_m = dau2_m[0]*mother.mom.p
-        dau_p2   = self.p2(dau1_m,dau2_m,mother.mom.m)
-        dau1_e   = np.sqrt(dau_p2+dau1_m**2)
-        dau2_e   = np.sqrt(dau_p2+dau2_m**2)
-        corr=(mother.mom.m/2)/np.sqrt(dau_p2)#correction to ensure transverse momentum is z*p*sin(theta), factor is 1 for massless particles
-        corr=1
-        dau1_theta = (np.pi/2 + np.arcsin(randomdraw_theta*corr)) 
-        dau2_theta = (np.pi/2 - np.arcsin(randomdraw_theta*corr))
-        dau1_phi = mother.mom.phi + randomdraw_phi
-        dau2_phi = mother.mom.phi + randomdraw_phi + np.pi
-        dau1_phi %= (2*np.pi)
-        dau2_phi %= (2*np.pi)
-        #prep for 4-vector
-        eta1   = self.theta_to_eta(dau1_theta)
-        eta2   = self.theta_to_eta(dau2_theta)
-        #print("eta1:",eta1,"eta2:",eta2,"dsintheta",randomdraw_theta,"corr",corr,"-",dau1_m,dau2_m,"-",np.sqrt(dau_p2),mother.mom.m/2)
-        dau1_mom = Momentum4.e_m_eta_phi(dau1_e, dau1_m, eta1[0], dau1_phi)
-        dau2_mom = Momentum4.e_m_eta_phi(dau2_e, dau2_m, eta2[0], dau2_phi)        
-        dau1_mom = self.rotateTheta(dau1_mom,mother.mom.theta)
-        dau2_mom = self.rotateTheta(dau2_mom,mother.mom.theta)
-        #finally boost and send it off
-        dau1 = particle(mom=dau1_mom,randtheta=randtheta1)
-        dau2 = particle(mom=dau2_mom,randtheta=randtheta2)
-        dau1.mom = dau1.mom.boost_particle(mother.mom)
-        dau2.mom = dau2.mom.boost_particle(mother.mom)
-        #print("deta:",np.abs(mother.mom.eta-dau1.mom.eta),mother.randtheta)
-        self.z.append(np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t))
-        self.zsoft.append(np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t))
-        self.randtheta.append(randomdraw_theta)
-        return dau1, dau2
 
     def massapprox(self,z,theta,p):
         return np.sqrt(z*(1-z))*p*theta
@@ -209,6 +180,8 @@ class jet_data_generator(object):
         return self.mass(z,theta)*p
 
     def dau2mass(self,mother,z,theta):
+        
+
         dau1_m = self.massapprox(z,theta,mother.mom.p)
         dau1_e = (mother.mom.p)*mother.z
         dau1_eta = self.theta_to_eta(-mother.randtheta+np.pi/2)
@@ -263,49 +236,7 @@ class jet_data_generator(object):
     def mom_value(self,e,z1,t1,z2,t2,z):
         c=1+z*0.5*z1*t1**2+(1-z)*0.5*z2*t2**2
         return e/c
-    
-    def softsplit_try2(self, mother):
-        np.random.seed()
-        randomdraw_phi = 0#np.random.uniform(0,2*np.pi)
-        randomdraw_theta=mother.randtheta
-        zrand=mother.z
-        if randomdraw_theta == -1000:
-            zrand,randomdraw_theta=self.randz(zmin=0.2/mother.mom.p,m=mother.mom.m/mother.mom.p,isize=1)
-        dau1_z,randtheta1 = self.randztheta(zmin=0.2/mother.mom.p,mmin=1e-10,mmax=mother.mom.m/mother.mom.p,isize=1)
-        dau2_z,randtheta2 = self.randztheta(zmin=0.2/mother.mom.p,mmin=1e-10,mmax=mother.mom.m/mother.mom.p,isize=1)
-        dau1_m = self.massp(dau1_z,randtheta1,mother.mom.p) #mass was dimensionless in sampler
-        dau2_m = self.massp(dau2_z,randtheta2,mother.mom.p)
-        #print("!!!",dau1_z,dau1_m,zrand,randomdraw_theta,dau2_m)
-        dau1_phi =  randomdraw_phi
-        dau2_phi =  randomdraw_phi + np.pi
-        dau1_phi %= (2*np.pi)
-        dau2_phi %= (2*np.pi)
-        dau1_theta = randomdraw_theta*np.cos(dau1_phi)
-        dau1_phi   = randomdraw_theta*np.sin(dau1_phi)
-        dau2_theta = (zrand)/(1-zrand)*randomdraw_theta*np.cos(dau2_phi)
-        dau2_phi   = (zrand)/(1-zrand)*randomdraw_theta*np.sin(dau2_phi)
-        eta1   = self.theta_to_eta(dau1_theta+np.pi/2)
-        eta2   = self.theta_to_eta(dau2_theta+np.pi/2)
-        dau1_e = np.sqrt((dau_p*zrand)**2+dau1_m**2)
-        dau2_e = np.sqrt((dau_p*(1-zrand))**2+dau2_m**2)
-        dau1_mom = Momentum4.e_m_eta_phi(dau1_e[0], dau1_m[0], eta1[0], dau1_phi[0])
-        dau2_mom = Momentum4.e_m_eta_phi(dau2_e[0], dau2_m[0], eta2[0], dau2_phi[0])
-        dau1_mom = self.rotateTheta(dau1_mom,mother.mom.theta-np.pi/2)
-        dau2_mom = self.rotateTheta(dau2_mom,mother.mom.theta-np.pi/2)
-        dau1_mom = self.rotatePhi(dau1_mom,mother.mom.phi)
-        dau2_mom = self.rotatePhi(dau2_mom,mother.mom.phi)
-        dau2_mom=mother.mom-dau1_mom
-        print("Test",dau2_mom.m,"-",dau2_m)
-        #sumvec=dau1_mom+dau2_mom
-        #print("test2",sumvec.p,sumvec.m,sumvec.eta,"--",mother.mom.p,mother.mom.m,mother.mom.eta)
-        #print("test",sumvec.p,sumvec.m,sumvec.eta,"--",mother.mom.p,mother.mom.m,mother.mom.eta)
-        #send it off
-        dau1 = particle(mom=dau1_mom,randtheta=randtheta1,z=dau1_z)
-        dau2 = particle(mom=dau2_mom,randtheta=randtheta2,z=dau2_z)
-        self.zsoft.append(np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t))
-        self.z.append(np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t))
-        self.randtheta.append(randomdraw_theta)
-        return dau1,dau2
+
 
     def checkm1m2m(self,m,m1,m2):
         v1=m**2-m1**2-m2**2
@@ -334,6 +265,8 @@ class jet_data_generator(object):
         return np.arctan(np.sqrt((first-np.sqrt(second))/6.))
 
     def dau2(self,iMother,iM1,iTheta,iZ,iPhi):
+        # print('In dau2: mother.mom.e', iMother.mom.e)
+
         dau1_m  = iM1
         dau1_px = iZ*iMother.mom.p
         dau1_pz = np.tan(iTheta)*iMother.mom.p
@@ -342,15 +275,88 @@ class jet_data_generator(object):
         dau1_phi   = iTheta*np.sin(iPhi)
         dau1_eta   = self.theta_to_eta(-dau1_theta+np.pi/2)
         dau1_e = np.sqrt(dau1_px**2+dau1_pz**2+dau1_m**2)
-        d1=Momentum4.e_m_eta_phi(dau1_e[0], dau1_m, dau1_eta[0],dau1_phi[0])
+        if hasattr(dau1_e,"__len__"):
+            dau1_e = dau1_e[0]
+        if hasattr(dau1_phi,"__len__"):
+            dau1_eta = dau1_eta[0]
+        if hasattr(dau1_phi,"__len__"):
+            dau1_phi = dau1_phi[0]
+        if hasattr(dau1_m,"__len__"):
+            dau1_m = dau1_m[0]
+        d1=Momentum4.e_m_eta_phi(dau1_e, dau1_m, dau1_eta,dau1_phi)
         mo=iMother.mom
         d1 = self.rotateTheta(d1,iMother.mom.theta-np.pi/2)
         d1 = self.rotatePhi  (d1,iMother.mom.phi)
         d2 = mo-d1
         return d1,d2
 
+    def daun(self, mother, n):
+        daughters = []
+        cur_mother = mother
+        # Flatten mother.mom.e if needed:
+        mother_e = mother.mom.e
+        if hasattr(mother_e, "__len__"):
+            mother_e = mother_e[0]
+
+        # print('Starting mother momentum', mother.mom)
+        for i in range(n - 1):
+            # print('Creating daughter number', i)
+            randomdraw_phi = np.random.uniform(0,2*np.pi)
+            zrand,randomdraw_theta,rand_m1,rand_m2=self.randz(mother=cur_mother,iPhi=randomdraw_phi,isize=1)
+            # print('zrand',zrand)
+
+
+            rand_m1 = rand_m1[0] if hasattr(rand_m1, "__len__") else rand_m1
+            randomdraw_theta = randomdraw_theta[0] if hasattr(randomdraw_theta, "__len__") else randomdraw_theta
+            zrand = zrand[0] if hasattr(zrand, "__len__") else zrand
+            randomdraw_phi = randomdraw_phi[0] if hasattr(randomdraw_phi, "__len__") else randomdraw_phi
+            dau1, dau2 = self.dau2(cur_mother, rand_m1, randomdraw_theta, zrand, randomdraw_phi)
+            if dau1.e < 0:
+                print('Negative energy daughter 1:', dau1)
+            if dau2.e < 0:
+                print('Negative energy daughter 2:', dau2)
+            # print('Daughter 1', dau1)
+            # print('Daughter 2', dau2)
+            
+            
+            daughters.append(
+                particle(
+                    mom=dau1,
+                    randtheta=randomdraw_theta,
+                    z=zrand,
+                    m1=-1000,
+                    m2=-1000,
+                    prong_label=mother.prong_label,
+                    part_label=-1,
+                    part_parent_label=mother.part_label,
+                    resonance_origin=mother.resonance_origin
+                )
+            )
+            cur_mother.mom = dau2
+            # print('Cur mother mom check', cur_mother.mom)
+
+        # Final daughter for momentum conservation
+        daughters.append(
+            particle(
+                mom=dau2,
+                randtheta=-1000,
+                z=0,
+                m1=-1000,
+                m2=-1000,
+                prong_label=mother.prong_label,
+                part_label=-1,
+                part_parent_label=mother.part_label,
+                resonance_origin=mother.resonance_origin
+            )
+        )
+        return daughters
+
     def checkdau2(self,iMother,iM1,iTheta,iZ,iPhi):
         d1,d2=self.dau2(iMother,iM1,iTheta,iZ,iPhi)
+        # print('In checkdau2')
+        # print(iMother, iM1, iTheta, iZ, iPhi)
+        # print(d1, d2)
+        # print('D2 complex mass check', np.iscomplex(d2.m)) 
         return np.iscomplex(d2.m)
 
     def randz(self,mother,iPhi,thetamin=1e-10,thetamax=0.4,isize=1):
@@ -367,6 +373,8 @@ class jet_data_generator(object):
         m2 = self.fullform(z2,t2)*p*(1-z)
         theta=self.theta_func(z,m,m1,m2,p)
         count=0
+        # print(mother, iPhi, thetamin, thetamax, isize)
+        # print(theta,z,m1,m2,self.checkm1m2m(m,m1,m2),self.checkdau2(mother,m1,theta,z,iPhi))
         while(theta < thetamin or theta > thetamax or (np.isnan(theta)) or z < zmin or z > zmax
               or z1 > 0.5 or z > 0.5 or t1 > 0.5 or t2 > 0.5
               or m1 < 0.1 or m2 < 0.1 
@@ -386,9 +394,136 @@ class jet_data_generator(object):
             #print("theta",m,p,z,theta,m1,m2,self.checkm1m2m(m,m1,m2),self.checkdau2(mother,m1,theta,z,iPhi))
             return -1,-1,-1,-1
         return z,theta,m1,m2
+    
+    def randz_resonance(self, mother, fixed_m1, iPhi, thetamin=1e-10, thetamax=0.4, isize=1):
+        m = mother.mom.m
+        p = mother.mom.p
+        zmin = np.maximum(0.2 / mother.mom.p, 0.5 * (1 - np.sqrt(1 - (m / p) ** 2)))
+        zmax = 0.75
+        z = beta.rvs(0.1, 1, size=isize)
+        z2 = beta.rvs(0.1, 1, size=isize)
+        t2 = beta.rvs(thetamin, 1, size=isize)
+        m1 = fixed_m1
+        m2 = self.fullform(z2, t2) * p * (1 - z)
+        print('zmin', zmin)
+        print('zmax', zmax)
+
+
+        theta = self.theta_func(z, m, m1, m2, p)
+        count = 0
+
+        # print(mother, iPhi, thetamin, thetamax, isize)
+        # print(theta, z, m1, m2, self.checkm1m2m(m, m1, m2), self.checkdau2(mother, m1, theta, z, iPhi))
+
+        while (theta < thetamin or theta > thetamax or np.isnan(theta) or z < zmin or z > zmax
+               or z > 0.5 or t2 > 0.5
+               or m1 < 0.1 or m2 < 0.1
+               or not self.checkm1m2m(m, m1, m2) or self.checkdau2(mother, m1, theta, z, iPhi)):
+            z = beta.rvs(0.1, 1, size=isize)
+            z2 = beta.rvs(0.1, 1, size=isize)
+            t2 = beta.rvs(0.1, 1, size=isize)
+            m2 = self.fullform(z2, t2) * p * (1 - z)
+            theta = self.theta_func(z, m, m1, m2, p)
+            count += 1
+            if count > 10000:
+                print('Failed to find splitting')
+                return -1, -1, -1
+        return z, theta, m2
+    
+
+    def create_resonance(self, mother, resonance):
+        resonance_mass = resonance['mass']
+        decay_products = resonance['decay_products']
+
+        # -- Flatten mother 4-vector if it is a length-1 array --
+        mother_e = mother.mom.e
+        mother_eta = mother.mom.eta
+        mother_phi = mother.mom.phi
+        mother_p   = mother.mom.p
+
+        # If any are length-1 arrays, convert them to scalars
+        # (the 'hasattr(x, "__len__")' check is just to see if it’s array-like)
+        if hasattr(mother_e, "__len__"):
+            mother_e = mother_e[0]
+        if hasattr(mother_eta, "__len__"):
+            mother_eta = mother_eta[0]
+        if hasattr(mother_phi, "__len__"):
+            mother_phi = mother_phi[0]
+        if hasattr(mother_p, "__len__"):
+            mother_p = mother_p[0]
+
+        # Ensure mother has enough energy
+        if mother_e*1.2 < resonance_mass:
+            return [mother]
+
+        # Decay from quark -> resonance + quark
+        # randomdraw_phi = np.random.uniform(0,2*np.pi)
+        # zrand,randomdraw_theta,quark_mass=self.randz_resonance(mother=mother,iPhi=randomdraw_phi,fixed_m1 = resonance_mass)
+        # print('Quark mass', quark_mass)
+       
+
+        # resonance_mom, quark_mom = self.dau2(mother,resonance_mass,randomdraw_theta,zrand,randomdraw_phi)
+        
+        print('Hard splitting mother:',mother)
+        print('Mother momentum', mother.mom)
+        print('Mother mass', mother.mom.m)
+        print('Resonance mass:',resonance_mass)
+        resonance_part, quark_part,_,_ = self.hardsplit_to_resonance(mother,resonance_mass)
+        count = 0
+        resonance_mom = resonance_part.mom
+        cur_resonance_mass = resonance_mom.m
+        cur_quark_mass = quark_part.mom.m
+        while cur_resonance_mass < 0.1 or cur_quark_mass < 0.1 or np.isnan(cur_resonance_mass) or np.isnan(cur_quark_mass) or np.iscomplex(cur_resonance_mass) or np.iscomplex(cur_quark_mass):
+            resonance_part, quark_part,_,_ = self.hardsplit_to_resonance(mother,resonance_mass)
+            resonance_mom = resonance_part.mom
+            cur_resonance_mass = resonance_mom.m
+            cur_quark_mass = quark_part.mom.m
+            count += 1
+            if count > 10000:
+                print('Failed to find splitting')
+                return -1, -1, -1
+        print('Resonance mass', resonance_mom.m)
+        print('Quark mass', quark_part.mom.m)
+
+
+        if resonance_mom.e < 0:
+            print('Negative energy resonance:', resonance_mom)
+            
+        if quark_part.mom.e < 0:
+            print('Negative energy quark:', quark_part.mom.e)
+        resonance_particle = particle(
+            mom=resonance_mom,
+            randtheta=-1000,
+            z=-1000,
+            m1=-1000,
+            m2=-1000,
+            prong_label=-1,
+            part_label=-1,
+            part_parent_label=mother.part_label,
+            resonance_origin=f"Resonance_{resonance_mass}_{self.n_resonance}"
+        )
+
+        # print('Resonance created:', resonance_particle)
+        # print('Massless Quark created:', massless_quark)
+
+        # print('Showering resonance \n')
+        # Decay the resonance using daun
+        daughters = self.daun(resonance_particle, decay_products)
+        daughters.append(quark_part)
+        self.n_resonance += 1
+        return daughters
+
+
    
     def softsplit(self, mother):
+        """Soft splitting logic with resonance integration."""
         np.random.seed()
+        for resonance in self.resonance_data:
+            if np.random.rand() < resonance['probability']:
+                return self.create_resonance(mother, resonance), -1000, -1000
+
+        # print('Softsplitting with', mother.mom.eta, mother.mom.phi, mother.mom.p)
+
         randomdraw_phi = np.random.uniform(0,2*np.pi)
         randomdraw_theta=mother.randtheta
         zrand=mother.z
@@ -399,20 +534,34 @@ class jet_data_generator(object):
             mother.z=zrand
             mother.randtheta=randomdraw_theta
             if zrand == -1:
-                dau1 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
-                dau2 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
+                dau1 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000, 
+                                prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+                dau2 = particle(mom=mother.mom,randtheta=-1000,z=-1,m1=-1000,m2=-1000, 
+                                prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
                 
-                return dau1,dau2, -111.11, -111.11
+                return [dau1,dau2], -111.11, -111.11
         dau1_mom,dau2_mom=self.dau2(mother,rand_m1,randomdraw_theta,zrand,randomdraw_phi)
-        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
-        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
-        #print("dau1 m",dau1.mom,"dau2 m",dau2.mom)
-        self.z.append(np.min([dau1.mom.p_t[0], dau2.mom.p_t[0]])/(dau1.mom.p_t[0]+dau2.mom.p_t[0]))
-        self.zsoft.append(np.min([dau1.mom.p_t[0], dau2.mom.p_t[0]])/(dau1.mom.p_t[0]+dau2.mom.p_t[0]))
-        self.randtheta.append(randomdraw_theta[0])
-        #print(dau1, dau2, np.min([dau1.mom.p_t[0], dau2.mom.p_t[0]])/(dau1.mom.p_t[0]+dau2.mom.p_t[0]), randomdraw_theta)
+        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
+                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
+                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+
+
+        dau1_pt = dau1.mom.p_t
+        dau2_pt = dau2.mom.p_t
+        if hasattr(dau1_pt, "__len__"):
+            dau1_pt = dau1_pt[0]
+        if hasattr(dau2_pt, "__len__"):
+            dau2_pt = dau2_pt[0]
+        if hasattr(randomdraw_theta, "__len__"):
+            randomdraw_theta = randomdraw_theta[0]
+
+        self.z.append(np.min([dau1_pt, dau2_pt])/(dau1_pt + dau2_pt))
+        self.zsoft.append(np.min([dau1_pt, dau2_pt])/(dau1_pt + dau2_pt))
+        self.randtheta.append(randomdraw_theta)
+        #print(dau1, dau2, np.min([dau1_pt, dau2_pt])/(dau1_pt + dau2_pt), randomdraw_theta)
         #print("randomtheta: ", randomdraw_theta[0])
-        return dau1, dau2, np.min([dau1.mom.p_t[0], dau2.mom.p_t[0]])/(dau1.mom.p_t[0]+dau2.mom.p_t[0]), randomdraw_theta[0]
+        return [dau1, dau2], np.min([dau1_pt, dau2_pt])/(dau1_pt + dau2_pt), randomdraw_theta
 
     
     def hardsplit(self, mother, nthsplit):
@@ -457,8 +606,73 @@ class jet_data_generator(object):
         dau2_mom = self.rotateTheta(dau2_mom,mother.mom.theta-np.pi/2)
         dau1_mom = self.rotatePhi(dau1_mom,mother.mom.phi)
         dau2_mom = self.rotatePhi(dau2_mom,mother.mom.phi)
-        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
-        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)
+        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
+                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
+                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+        dau1.mom = dau1.mom.boost_particle(mother.mom)
+        dau2.mom = dau2.mom.boost_particle(mother.mom)
+        self.randtheta.append(randomdraw_theta)
+        self.zhard.append(np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t))
+        self.z.append(np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t))
+        return dau1, dau2, np.min([dau1.mom.p_t, dau2.mom.p_t])/(dau1.mom.p_t+dau2.mom.p_t), randomdraw_theta
+
+    def hardsplit_to_resonance(self, mother, resonance_mass):
+        #Hard splitting performed in the rest frame of the mother, rotated, and then lorentz boosted back
+        #Hard splitting prior: Gaussian around pi/2,
+        np.random.seed()
+        #randomdraw_theta = np.abs(np.random.normal(np.pi/2,0.1))
+        randomdraw_theta = np.random.uniform(0.1,np.pi/2.-0.1)
+        randomdraw_phi   = np.random.uniform(0,2*np.pi)
+        
+        dau1_m = resonance_mass
+        dau2_m = np.random.uniform(mother.mom.m/16, mother.mom.m/2)
+
+        dau1_theta = (np.pi/2 + randomdraw_theta)
+        dau2_theta = (np.pi/2 - randomdraw_theta)        
+        dau1_phi = mother.mom.phi + randomdraw_phi
+        dau2_phi = mother.mom.phi + randomdraw_phi + np.pi
+        dau1_phi %= (2*np.pi)
+        dau2_phi %= (2*np.pi)
+        #prep for 4-vector
+        dau_p2   = self.p2(dau1_m,dau2_m,mother.mom.m)
+        dau1_e   = np.sqrt(dau_p2+dau1_m**2)
+        dau2_e   = np.sqrt(dau_p2+dau2_m**2)
+        # Ensure inputs are floats
+        if hasattr(dau1_e, "__len__"):
+            dau1_e = dau1_e[0]
+        if hasattr(dau1_m, "__len__"):
+            dau1_m = dau1_m[0]
+        if hasattr(dau1_theta, "__len__"):
+            dau1_theta = dau1_theta[0]
+        if hasattr(dau1_phi, "__len__"):
+            dau1_phi = dau1_phi[0]
+        if hasattr(dau2_e, "__len__"):
+            dau2_e = dau2_e[0]
+        if hasattr(dau2_m, "__len__"):
+            dau2_m = dau2_m[0]
+        if hasattr(dau2_theta, "__len__"):
+            dau2_theta = dau2_theta[0]
+        if hasattr(dau2_phi, "__len__"):
+            dau2_phi = dau2_phi[0]
+        dau1_eta = self.theta_to_eta(dau1_theta)
+        dau2_eta = self.theta_to_eta(dau2_theta)
+
+        if hasattr(dau1_eta, "__len__"):
+            dau1_eta = dau1_eta[0]
+        if hasattr(dau2_eta, "__len__"):
+            dau2_eta = dau2_eta[0]
+
+        dau1_mom = Momentum4.e_m_eta_phi(dau1_e, dau1_m, dau1_eta, dau1_phi)
+        dau2_mom = Momentum4.e_m_eta_phi(dau2_e, dau2_m, dau2_eta, dau2_phi)
+        dau1_mom = self.rotateTheta(dau1_mom,mother.mom.theta-np.pi/2)
+        dau2_mom = self.rotateTheta(dau2_mom,mother.mom.theta-np.pi/2)
+        dau1_mom = self.rotatePhi(dau1_mom,mother.mom.phi)
+        dau2_mom = self.rotatePhi(dau2_mom,mother.mom.phi)
+        dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
+                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+        dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
+                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
         dau1.mom = dau1.mom.boost_particle(mother.mom)
         dau2.mom = dau2.mom.boost_particle(mother.mom)
         self.randtheta.append(randomdraw_theta)
@@ -484,7 +698,7 @@ class jet_data_generator(object):
         if self.doFixP:
             p = 400
         vec0 = Momentum4.m_eta_phi_p(m, 0, 0, p)
-        part = particle(mom=vec0,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1)  
+        part = particle(mom=vec0,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')  
         return part
 
     def hard_decays(self):
@@ -505,55 +719,62 @@ class jet_data_generator(object):
             
         return hardparticle_list, zlist, thetalist
 
-    def genshower(self,_):
-        
-        # Hard decay until one partcle for each prong
+    def genshower(self, _):
+        """Generate a full shower including soft splittings and resonances."""
+        # Hard decay until one particle for each prong
+        self.n_resonance = 0
         showered_list, zlist, thetalist = self.hard_decays()
-        
+
         for i in range(len(showered_list)):
             showered_list[i].prong_label = i
             showered_list[i].part_label = i
             showered_list[i].part_parent_label = -1
-        i += 1
-        
 
-        total_particle = len(showered_list)    
-        all_particles_list = []    
+        total_particle = len(showered_list)
+        all_particles_list = []
+
         while total_particle < self.nparticle:
+            print('\nNew Splitting')
             if showered_list[0].mom.p < 1:
                 break
-            #print(self.softsplit(showered_list[0]))
-            print(showered_list[0])
-            dau1, dau2, z, theta = self.softsplit(showered_list[0])
-            if dau1.z == -1:
+            print('Splitting particle with four-momentum', showered_list[0].mom)
+            daughters, z, theta = self.softsplit(showered_list[0])
+            # print(f'Showered into {len(daughters)-1} daughters')
+            if daughters[0].z == -1:
                 break
-            #print(dau1.mom,showered_list)
-            dau1.part_label = i
-            i += 1
-            dau2.part_label = i
-            i += 1
+            
+            for dau in daughters:
+                print('Daughter:', dau.mom)
+                print('Daughter mass', dau.mom.m)
+                dau.part_label = len(all_particles_list) + len(showered_list)
+                dau.prong_label = showered_list[0].prong_label
+                dau.part_parent_label = showered_list[0].part_label
+                if dau.resonance_origin == 'None':
+                    dau.resonance_origin = showered_list[0].resonance_origin
 
-            dau1.prong_label = showered_list[0].prong_label
-            dau2.prong_label = showered_list[0].prong_label
-            dau1.part_parent_label = showered_list[0].part_label
-            dau2.part_parent_label = showered_list[0].part_label
-            
-            all_particles_list.append(showered_list[0])
+                all_particles_list.append(dau)
+
             showered_list.pop(0)
+
+            for dau in daughters:
+                # print('Inserting daughter into showered_list', dau)
+                self.reverse_insort(showered_list, dau)
             
-            self.reverse_insort(showered_list, dau1)
-            self.reverse_insort(showered_list, dau2)
-            
+            # print('len of showered_list', len(showered_list))
+            # print('self.total_particle', total_particle)
+            # print('self.nparticle', self.nparticle)
+
             zlist.append(z)
             thetalist.append(theta)
-            
-            total_particle +=1
-        
+
+            total_particle += len(daughters)-1
+            # print(total_particle)
+
         for p in showered_list:
             all_particles_list.append(p)
 
         return total_particle, showered_list, zlist, thetalist, all_particles_list
-    
+
     def shower(self,_):
         i=0
 
@@ -565,8 +786,13 @@ class jet_data_generator(object):
 
         check = Momentum4(0,0,0,0)
         for j in range(self.nparticle):
-            #print("WITH NO INDEX",showered_list[j].mom.p_t, showered_list[j].mom.eta, showered_list[j].mom.phi )
-            #print("WITH 0 INDEX",showered_list[j].mom.p_t[0], showered_list[j].mom.eta[0], showered_list[j].mom.phi[0] )
+            # Debug prints to inspect the state of showered_list and its elements
+            # print(f"showered_list[{j}]: {showered_list[j]}")
+            # print(f"showered_list[{j}].mom: {showered_list[j].mom}")
+            # print(f"showered_list[{j}].mom.p_t: {showered_list[j].mom.p_t}")
+            # print(f"showered_list[{j}].mom.eta: {showered_list[j].mom.eta}")
+            # print(f"showered_list[{j}].mom.phi: {showered_list[j].mom.phi}")
+
             arr.append(showered_list[j].mom.p_t)
             arr.append(showered_list[j].mom.eta)
             arr.append(showered_list[j].mom.phi)
