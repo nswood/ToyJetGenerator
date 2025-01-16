@@ -6,6 +6,7 @@ import multiprocessing as mp
 from multiprocessing import Process, Pool
 from dataclasses import dataclass
 import math
+import copy
 
 @dataclass
 class particle:
@@ -297,8 +298,9 @@ class jet_data_generator(object):
         mother_e = mother.mom.e
         if hasattr(mother_e, "__len__"):
             mother_e = mother_e[0]
-
-        # print('Starting mother momentum', mother.mom)
+        print('In daun function')
+        print('Starting mother momentum', mother.mom)
+        remaining_mom = mother.mom
         for i in range(n - 1):
             # print('Creating daughter number', i)
             randomdraw_phi = np.random.uniform(0,2*np.pi)
@@ -311,6 +313,8 @@ class jet_data_generator(object):
             zrand = zrand[0] if hasattr(zrand, "__len__") else zrand
             randomdraw_phi = randomdraw_phi[0] if hasattr(randomdraw_phi, "__len__") else randomdraw_phi
             dau1, dau2 = self.dau2(cur_mother, rand_m1, randomdraw_theta, zrand, randomdraw_phi)
+            
+            
             if dau1.e < 0:
                 print('Negative energy daughter 1:', dau1)
             if dau2.e < 0:
@@ -333,12 +337,14 @@ class jet_data_generator(object):
                 )
             )
             cur_mother.mom = dau2
+            remaining_mom -= dau1
+            print('Remaining mom', remaining_mom)
             # print('Cur mother mom check', cur_mother.mom)
 
         # Final daughter for momentum conservation
         daughters.append(
             particle(
-                mom=dau2,
+                mom=remaining_mom,
                 randtheta=-1000,
                 z=0,
                 m1=-1000,
@@ -394,42 +400,6 @@ class jet_data_generator(object):
             #print("theta",m,p,z,theta,m1,m2,self.checkm1m2m(m,m1,m2),self.checkdau2(mother,m1,theta,z,iPhi))
             return -1,-1,-1,-1
         return z,theta,m1,m2
-    
-    def randz_resonance(self, mother, fixed_m1, iPhi, thetamin=1e-10, thetamax=0.4, isize=1):
-        m = mother.mom.m
-        p = mother.mom.p
-        zmin = np.maximum(0.2 / mother.mom.p, 0.5 * (1 - np.sqrt(1 - (m / p) ** 2)))
-        zmax = 0.75
-        z = beta.rvs(0.1, 1, size=isize)
-        z2 = beta.rvs(0.1, 1, size=isize)
-        t2 = beta.rvs(thetamin, 1, size=isize)
-        m1 = fixed_m1
-        m2 = self.fullform(z2, t2) * p * (1 - z)
-        print('zmin', zmin)
-        print('zmax', zmax)
-
-
-        theta = self.theta_func(z, m, m1, m2, p)
-        count = 0
-
-        # print(mother, iPhi, thetamin, thetamax, isize)
-        # print(theta, z, m1, m2, self.checkm1m2m(m, m1, m2), self.checkdau2(mother, m1, theta, z, iPhi))
-
-        while (theta < thetamin or theta > thetamax or np.isnan(theta) or z < zmin or z > zmax
-               or z > 0.5 or t2 > 0.5
-               or m1 < 0.1 or m2 < 0.1
-               or not self.checkm1m2m(m, m1, m2) or self.checkdau2(mother, m1, theta, z, iPhi)):
-            z = beta.rvs(0.1, 1, size=isize)
-            z2 = beta.rvs(0.1, 1, size=isize)
-            t2 = beta.rvs(0.1, 1, size=isize)
-            m2 = self.fullform(z2, t2) * p * (1 - z)
-            theta = self.theta_func(z, m, m1, m2, p)
-            count += 1
-            if count > 10000:
-                print('Failed to find splitting')
-                return -1, -1, -1
-        return z, theta, m2
-    
 
     def create_resonance(self, mother, resonance):
         resonance_mass = resonance['mass']
@@ -437,6 +407,7 @@ class jet_data_generator(object):
 
         # -- Flatten mother 4-vector if it is a length-1 array --
         mother_e = mother.mom.e
+        mother_m = mother.mom.m
         mother_eta = mother.mom.eta
         mother_phi = mother.mom.phi
         mother_p   = mother.mom.p
@@ -452,9 +423,8 @@ class jet_data_generator(object):
         if hasattr(mother_p, "__len__"):
             mother_p = mother_p[0]
 
-        # Ensure mother has enough energy
-        if mother_e*1.2 < resonance_mass:
-            return [mother]
+        # Ensure mother has enough energy for decay
+        
 
         # Decay from quark -> resonance + quark
         # randomdraw_phi = np.random.uniform(0,2*np.pi)
@@ -483,45 +453,46 @@ class jet_data_generator(object):
                 print('Failed to find splitting')
                 return -1, -1, -1
         print('Resonance mass', resonance_mom.m)
+        print('Resonance momentum', resonance_mom)
         print('Quark mass', quark_part.mom.m)
+        print('Quark momentum', quark_part.mom)
+        
 
-
-        if resonance_mom.e < 0:
-            print('Negative energy resonance:', resonance_mom)
-            
-        if quark_part.mom.e < 0:
-            print('Negative energy quark:', quark_part.mom.e)
         resonance_particle = particle(
             mom=resonance_mom,
             randtheta=-1000,
             z=-1000,
             m1=-1000,
             m2=-1000,
-            prong_label=-1,
-            part_label=-1,
+            prong_label=mother.prong_label,
+            part_label=self.total_part_counter,
             part_parent_label=mother.part_label,
             resonance_origin=f"Resonance_{resonance_mass}_{self.n_resonance}"
         )
 
-        # print('Resonance created:', resonance_particle)
-        # print('Massless Quark created:', massless_quark)
+        self.total_part_counter += 1
+        quark_part.part_label = self.total_part_counter
+        self.total_part_counter += 1
+        quark_part.part_parent_label = mother.part_label
+        quark_part.prong_label = mother.prong_label
+        print('Resonance created:', resonance_particle)
+        print('Massless Quark created:', quark_part)
 
-        # print('Showering resonance \n')
+        print('Showering resonance \n')
         # Decay the resonance using daun
-        daughters = self.daun(resonance_particle, decay_products)
-        daughters.append(quark_part)
+        daughters = self.daun(copy.deepcopy(resonance_particle), decay_products)
+        
         self.n_resonance += 1
-        return daughters
+        # print('Checking for -1')
+        # print('Resonance:',resonance_particle)
+        # print('Quark:',quark_part)
+        return daughters, quark_part, resonance_particle
 
 
    
     def softsplit(self, mother):
         """Soft splitting logic with resonance integration."""
-        np.random.seed()
-        for resonance in self.resonance_data:
-            if np.random.rand() < resonance['probability']:
-                return self.create_resonance(mother, resonance), -1000, -1000
-
+        
         # print('Softsplitting with', mother.mom.eta, mother.mom.phi, mother.mom.p)
 
         randomdraw_phi = np.random.uniform(0,2*np.pi)
@@ -722,23 +693,40 @@ class jet_data_generator(object):
     def genshower(self, _):
         """Generate a full shower including soft splittings and resonances."""
         # Hard decay until one particle for each prong
+        self.total_part_counter = 0
         self.n_resonance = 0
         showered_list, zlist, thetalist = self.hard_decays()
+
+        all_particles_list = []
 
         for i in range(len(showered_list)):
             showered_list[i].prong_label = i
             showered_list[i].part_label = i
             showered_list[i].part_parent_label = -1
+            # all_particles_list.append(showered_list[i])
+        
+        self.total_particle = len(showered_list)
+        self.total_part_counter = len(showered_list)
+        print('Before soft splitting')
+        print(all_particles_list)
 
-        total_particle = len(showered_list)
-        all_particles_list = []
-
-        while total_particle < self.nparticle:
+        while self.total_particle < self.nparticle:
             print('\nNew Splitting')
             if showered_list[0].mom.p < 1:
                 break
-            print('Splitting particle with four-momentum', showered_list[0].mom)
-            daughters, z, theta = self.softsplit(showered_list[0])
+            print('Splitting particle', showered_list[0])
+
+            np.random.seed()
+            resonance_made = False
+            for resonance in self.resonance_data:
+                if np.random.rand() < resonance['probability']:
+                    if showered_list[0].mom.m > resonance['mass']*1.2:
+                        resonance_made = True
+                        daughters, intermediate_quark, resonance_particle =  self.create_resonance(showered_list[0], resonance)
+                        z, theta = -1000, -1000
+            if not resonance_made:
+                daughters, z, theta = self.softsplit(showered_list[0])
+            
             # print(f'Showered into {len(daughters)-1} daughters')
             if daughters[0].z == -1:
                 break
@@ -746,15 +734,27 @@ class jet_data_generator(object):
             for dau in daughters:
                 print('Daughter:', dau.mom)
                 print('Daughter mass', dau.mom.m)
-                dau.part_label = len(all_particles_list) + len(showered_list)
+                dau.part_label = self.total_part_counter
+                self.total_part_counter += 1
                 dau.prong_label = showered_list[0].prong_label
-                dau.part_parent_label = showered_list[0].part_label
+                if resonance_made:
+                    dau.part_parent_label = resonance_particle.part_label
+                else:
+                    dau.part_parent_label = showered_list[0].part_label
+                print('Daughter part_label', dau.part_label)
                 if dau.resonance_origin == 'None':
                     dau.resonance_origin = showered_list[0].resonance_origin
 
-                all_particles_list.append(dau)
-
+            all_particles_list.append(showered_list[0])
             showered_list.pop(0)
+            if resonance_made:
+                print('intermediate_quark part label', intermediate_quark.part_label)
+                print('resonance_particle part label', resonance_particle.part_label)
+                
+                print('intermediate_quark', intermediate_quark)
+                print('resonance_particle', resonance_particle)
+                all_particles_list.append(resonance_particle)
+                self.reverse_insort(showered_list, intermediate_quark)
 
             for dau in daughters:
                 # print('Inserting daughter into showered_list', dau)
@@ -766,14 +766,18 @@ class jet_data_generator(object):
 
             zlist.append(z)
             thetalist.append(theta)
-
-            total_particle += len(daughters)-1
+            if resonance_made:
+                self.total_particle += len(daughters) # len(daughters) for resonance -> daughters, +1 for intermediate quark, -1 for showered particle
+            else:
+                self.total_particle += len(daughters) - 1 # len(daughters) for resonance -> daughters, -1 for showered particle
+            
+            
             # print(total_particle)
 
         for p in showered_list:
             all_particles_list.append(p)
 
-        return total_particle, showered_list, zlist, thetalist, all_particles_list
+        return self.total_particle, showered_list, zlist, thetalist, all_particles_list
 
     def shower(self,_):
         i=0
@@ -782,25 +786,25 @@ class jet_data_generator(object):
         #print(total_particle, self.nparticle)
         while total_particle <  self.nparticle:
             total_particle,showered_list,zlist, thetalist, all_particles_list=self.genshower(i)
-        arr = []
+        # arr = []
 
-        check = Momentum4(0,0,0,0)
-        for j in range(self.nparticle):
-            # Debug prints to inspect the state of showered_list and its elements
-            # print(f"showered_list[{j}]: {showered_list[j]}")
-            # print(f"showered_list[{j}].mom: {showered_list[j].mom}")
-            # print(f"showered_list[{j}].mom.p_t: {showered_list[j].mom.p_t}")
-            # print(f"showered_list[{j}].mom.eta: {showered_list[j].mom.eta}")
-            # print(f"showered_list[{j}].mom.phi: {showered_list[j].mom.phi}")
+        # check = Momentum4(0,0,0,0)
+        # for j in range(self.nparticle):
+        #     # Debug prints to inspect the state of showered_list and its elements
+        #     # print(f"showered_list[{j}]: {showered_list[j]}")
+        #     # print(f"showered_list[{j}].mom: {showered_list[j].mom}")
+        #     # print(f"showered_list[{j}].mom.p_t: {showered_list[j].mom.p_t}")
+        #     # print(f"showered_list[{j}].mom.eta: {showered_list[j].mom.eta}")
+        #     # print(f"showered_list[{j}].mom.phi: {showered_list[j].mom.phi}")
 
-            arr.append(showered_list[j].mom.p_t)
-            arr.append(showered_list[j].mom.eta)
-            arr.append(showered_list[j].mom.phi)
-            check += showered_list[j].mom
+        #     arr.append(showered_list[j].mom.p_t)
+        #     arr.append(showered_list[j].mom.eta)
+        #     arr.append(showered_list[j].mom.phi)
+        #     check += showered_list[j].mom
 
 
         #print("squeeze",np.squeeze(np.array(arr)).shape, np.squeeze(np.array(zlist)).shape, np.squeeze(np.array(thetalist)).shape)
-        return np.squeeze(np.array(arr)), np.squeeze(np.array(zlist)), np.squeeze(np.array(thetalist)),np.array(showered_list),np.array(all_particles_list)
+        return np.array(showered_list),np.array(all_particles_list)
     
     def generate_dataset(self, nevent):
 
@@ -812,8 +816,6 @@ class jet_data_generator(object):
 #         data_particles = np.empty([nevent, self.nparticle], dtype=object)
                 
         data = np.empty([nevent], dtype=object)
-        data_z     = np.empty([nevent], dtype=object)
-        data_theta = np.empty([nevent], dtype=object)
         data_particles = np.empty([nevent], dtype=object)
         data_shower_particles = np.empty([nevent], dtype=object)
         base_n_particle = self.nparticle
@@ -833,16 +835,13 @@ class jet_data_generator(object):
                 self.nparticle = base_n_particle + adj
                 if i % 10 == 0:
                     print("event :",i)
-                arr, arr_z, arr_theta, arr_particles, shower_particles = self.shower(i)    
-                data[i] = arr
-                data_z[i] = arr_z
-                data_theta[i] = arr_theta
+                arr_particles, shower_particles = self.shower(i)    
                 data_particles[i] = arr_particles
                 data_shower_particles[i] = shower_particles
          
         
         #return output
-        return data, data_z, data_theta, data_particles, data_shower_particles
+        return data_particles, data_shower_particles
         
         
 #         return np.array(data), np.array(data_z), np.array(data_theta), np.array(data_particles)
