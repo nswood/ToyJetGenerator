@@ -596,24 +596,28 @@ class jet_data_generator(object):
 #         data_theta = []
 #         data_particles = []
         
-        
+        i =0
         if self.doMultiprocess:
             pool = Pool(processes=self.ncore)
             data, data_z, data_theta  = zip(*pool.map(self.shower,range(nevent)))
 
         else:
-            for i in range(nevent):
+            while i < nevent:
                 adj = 2*int(np.random.normal(0, int(0.1*base_n_particle)))
                 self.nparticle = base_n_particle + adj
                 if i % 10 == 0:
                     print("event :",i)
-                arr, arr_z, arr_theta, arr_particles, shower_particles = self.shower(i)    
-                data[i] = arr
-                data_z[i] = arr_z
-                data_theta[i] = arr_theta
-                data_particles[i] = arr_particles
-                data_shower_particles[i] = shower_particles
-         
+                try:
+                    arr, arr_z, arr_theta, arr_particles, shower_particles = self.shower(i)    
+                    data[i] = arr
+                    data_z[i] = arr_z
+                    data_theta[i] = arr_theta
+                    data_particles[i] = arr_particles
+                    data_shower_particles[i] = shower_particles
+                    i+=1
+                except:
+                    print('Error in event:', i)
+            
         
         #return output
         return data, data_z, data_theta, data_particles, data_shower_particles

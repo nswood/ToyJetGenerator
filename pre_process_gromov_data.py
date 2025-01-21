@@ -1,6 +1,6 @@
 # %%
 # from datagenerator import jet_data_generator 
-from datagenerator_realistic import jet_data_generator as realistic_generator
+from datagenerator_resonances_realistic import jet_data_generator as realistic_generator
 
 import time
 import torch # type: ignore
@@ -8,7 +8,15 @@ import os
 import argparse
 
 def generate_and_save_datasets(nprong, npts, num_samples,file_id):
-    realistic_sig_2p_16part = realistic_generator("signal", nprong, npts, True)
+    realistic_sig_2p_16part = realistic_generator("signal", nprong, npts, True,
+                resonance_data=[
+                    {'mass': 180.0, 'relative_ratio': 1.0, 'decay_products': 3},
+                    {'mass': 30.0, 'relative_ratio': 1.0, 'decay_products': 3},
+                    {'mass': 80.0, 'relative_ratio': 1.0, 'decay_products': 2},
+                    {'mass': 10.0, 'relative_ratio': 1.0, 'decay_products': 2},
+                ], 
+                total_resonance_prob=0.15, # Adjust total resonance probability as desired
+                max_resonance_per_jet = 1)
     start = time.time()
     dataset = realistic_sig_2p_16part.generate_dataset(num_samples)
     end = time.time()

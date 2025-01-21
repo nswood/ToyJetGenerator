@@ -39,7 +39,15 @@ class jet_data_generator(object):
     total_resonance_prob: float  # Total probability of any resonance occurring
 
     """
-    def __init__(self, massprior, nprong, nparticle, doFixP, resonance_data, total_resonance_prob, doMultiprocess=False, ncore=0):
+    def __init__(self, 
+                 massprior, 
+                 nprong, 
+                 nparticle, 
+                 doFixP, 
+                 resonance_data, 
+                 total_resonance_prob,
+                 max_resonance_per_jet=3, 
+                 doMultiprocess=False, ncore=0):
         super(jet_data_generator, self).__init__()
         self.massprior = massprior
         self.nprong = nprong
@@ -51,6 +59,7 @@ class jet_data_generator(object):
         self.doFixP = doFixP
         self.doMultiprocess = doMultiprocess
         self.ncore = ncore
+        
 
         # Normalize resonance probabilities
         total_ratio = sum(r['relative_ratio'] for r in resonance_data)
@@ -58,7 +67,7 @@ class jet_data_generator(object):
             r['probability'] = (r['relative_ratio'] / total_ratio) * total_resonance_prob
 
         self.resonance_data = resonance_data  # Store resonance configurations
-
+        self.max_resonance_per_jet = max_resonance_per_jet
     def reverse_insort(self, a, x, lo=0, hi=None):
         """Insert item x in list a, and keep it reverse-sorted assuming a
         is reverse-sorted. The key compared is the invariant mass of the 4-vector
@@ -186,10 +195,13 @@ class jet_data_generator(object):
         dau1_m = self.massapprox(z,theta,mother.mom.p)
         dau1_e = (mother.mom.p)*mother.z
         dau1_eta = self.theta_to_eta(-mother.randtheta+np.pi/2)
-        print(dau1_eta,dau1_m,dau1_e)
+        if self.verbose:
+            print(dau1_eta,dau1_m,dau1_e)
         d1=Momentum4.e_m_eta_phi(dau1_e[0], dau1_m, dau1_eta[0],0)
         mo=Momentum4.e_m_eta_phi(mother.mom.e,mother.mom.m, 0,0)
-        print(dau1_e,dau1_m,mo,d1,(mo-d1).m,mo.m,d1.m)
+        
+        if self.verbose:
+            print(dau1_e,dau1_m,mo,d1,(mo-d1).m,mo.m,d1.m)
         return ((mo-d1).m)/mother.mom.p
 
     def randztheta(self,mother,zmin=1e-5,thetamin=1e-5,thetamax=0.4,mmin=1e-10,mmax=0.2,isize=1):
@@ -210,7 +222,8 @@ class jet_data_generator(object):
             count+=1
             if count > 1000:
                 print("theta 1 ",restmass,massmax,z,theta,dau2mass,mother.z,mother.randtheta)
-        print("dau2mass",restmass*mother.mom.p,dau2mass*mother.mom.p,mother.randtheta)
+        if self.verbose:
+            print("dau2mass",restmass*mother.mom.p,dau2mass*mother.mom.p,mother.randtheta)
         #restmass=self.mass(z,theta)
         #massapprox=self.massapprox(z,theta,1)
         #print("mass check",restmass,massapprox,"---",z,theta,zmin,mmin)
@@ -298,8 +311,9 @@ class jet_data_generator(object):
         mother_e = mother.mom.e
         if hasattr(mother_e, "__len__"):
             mother_e = mother_e[0]
-        print('In daun function')
-        print('Starting mother momentum', mother.mom)
+        if self.verbose:
+            print('In daun function')
+            print('Starting mother momentum', mother.mom)
         remaining_mom = mother.mom
         for i in range(n - 1):
             # print('Creating daughter number', i)
@@ -338,7 +352,8 @@ class jet_data_generator(object):
             )
             cur_mother.mom = dau2
             remaining_mom -= dau1
-            print('Remaining mom', remaining_mom)
+            if self.verbose:
+                print('Remaining mom', remaining_mom)
             # print('Cur mother mom check', cur_mother.mom)
 
         # Final daughter for momentum conservation
@@ -433,11 +448,11 @@ class jet_data_generator(object):
        
 
         # resonance_mom, quark_mom = self.dau2(mother,resonance_mass,randomdraw_theta,zrand,randomdraw_phi)
-        
-        print('Hard splitting mother:',mother)
-        print('Mother momentum', mother.mom)
-        print('Mother mass', mother.mom.m)
-        print('Resonance mass:',resonance_mass)
+        if self.verbose:
+            print('Hard splitting mother:',mother)
+            print('Mother momentum', mother.mom)
+            print('Mother mass', mother.mom.m)
+            print('Resonance mass:',resonance_mass)
         resonance_part, quark_part,_,_ = self.hardsplit_to_resonance(mother,resonance_mass)
         count = 0
         resonance_mom = resonance_part.mom
@@ -452,10 +467,11 @@ class jet_data_generator(object):
             if count > 10000:
                 print('Failed to find splitting')
                 return -1, -1, -1
-        print('Resonance mass', resonance_mom.m)
-        print('Resonance momentum', resonance_mom)
-        print('Quark mass', quark_part.mom.m)
-        print('Quark momentum', quark_part.mom)
+        if self.verbose:
+            print('Resonance mass', resonance_mom.m)
+            print('Resonance momentum', resonance_mom)
+            print('Quark mass', quark_part.mom.m)
+            print('Quark momentum', quark_part.mom)
         
 
         resonance_particle = particle(
@@ -475,10 +491,11 @@ class jet_data_generator(object):
         self.total_part_counter += 1
         quark_part.part_parent_label = mother.part_label
         quark_part.prong_label = mother.prong_label
-        print('Resonance created:', resonance_particle)
-        print('Massless Quark created:', quark_part)
+        if self.verbose:
+            print('Resonance created:', resonance_particle)
+            print('Massless Quark created:', quark_part)
 
-        print('Showering resonance \n')
+            print('Showering resonance \n')
         # Decay the resonance using daun
         daughters = self.daun(copy.deepcopy(resonance_particle), decay_products)
         
@@ -513,9 +530,9 @@ class jet_data_generator(object):
                 return [dau1,dau2], -111.11, -111.11
         dau1_mom,dau2_mom=self.dau2(mother,rand_m1,randomdraw_theta,zrand,randomdraw_phi)
         dau1 = particle(mom=dau1_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
-                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+                        prong_label=-1,part_label=-1,part_parent_label=mother.part_label, resonance_origin = 'None')
         dau2 = particle(mom=dau2_mom,randtheta=-1000,z=-1000,m1=-1000,m2=-1000, 
-                        prong_label=-1,part_label=-1,part_parent_label=-1, resonance_origin = 'None')
+                        prong_label=-1,part_label=-1,part_parent_label=mother.part_label, resonance_origin = 'None')
 
 
         dau1_pt = dau1.mom.p_t
@@ -707,23 +724,28 @@ class jet_data_generator(object):
         
         self.total_particle = len(showered_list)
         self.total_part_counter = len(showered_list)
-        print('Before soft splitting')
-        print(all_particles_list)
+        if self.verbose:
+            print('Before soft splitting')
+            print(all_particles_list)
 
         while self.total_particle < self.nparticle:
-            print('\nNew Splitting')
+            if self.verbose:
+                print('\nNew Splitting')
             if showered_list[0].mom.p < 1:
                 break
-            print('Splitting particle', showered_list[0])
+            if self.verbose:
+                print('Splitting particle', showered_list[0])
 
             np.random.seed()
             resonance_made = False
-            for resonance in self.resonance_data:
-                if np.random.rand() < resonance['probability']:
-                    if showered_list[0].mom.m > resonance['mass']*1.2:
-                        resonance_made = True
-                        daughters, intermediate_quark, resonance_particle =  self.create_resonance(showered_list[0], resonance)
-                        z, theta = -1000, -1000
+            if self.n_resonance < self.max_resonance_per_jet:
+                for resonance in self.resonance_data:
+                    if np.random.rand() < resonance['probability']:
+                        if showered_list[0].mom.m > resonance['mass']*1.2:
+                            resonance_made = True
+                            daughters, intermediate_quark, resonance_particle =  self.create_resonance(showered_list[0], resonance)
+                            z, theta = -1000, -1000
+
             if not resonance_made:
                 daughters, z, theta = self.softsplit(showered_list[0])
             
@@ -732,8 +754,7 @@ class jet_data_generator(object):
                 break
             
             for dau in daughters:
-                print('Daughter:', dau.mom)
-                print('Daughter mass', dau.mom.m)
+                
                 dau.part_label = self.total_part_counter
                 self.total_part_counter += 1
                 dau.prong_label = showered_list[0].prong_label
@@ -741,18 +762,21 @@ class jet_data_generator(object):
                     dau.part_parent_label = resonance_particle.part_label
                 else:
                     dau.part_parent_label = showered_list[0].part_label
-                print('Daughter part_label', dau.part_label)
+                if self.verbose:
+                    print('Daughter:', dau)
+                    print('Daughter mass', dau.mom.m)
                 if dau.resonance_origin == 'None':
                     dau.resonance_origin = showered_list[0].resonance_origin
 
             all_particles_list.append(showered_list[0])
             showered_list.pop(0)
             if resonance_made:
-                print('intermediate_quark part label', intermediate_quark.part_label)
-                print('resonance_particle part label', resonance_particle.part_label)
-                
-                print('intermediate_quark', intermediate_quark)
-                print('resonance_particle', resonance_particle)
+                if self.verbose:
+                    print('intermediate_quark part label', intermediate_quark.part_label)
+                    print('resonance_particle part label', resonance_particle.part_label)
+                    
+                    print('intermediate_quark', intermediate_quark)
+                    print('resonance_particle', resonance_particle)
                 all_particles_list.append(resonance_particle)
                 self.reverse_insort(showered_list, intermediate_quark)
 
@@ -806,7 +830,8 @@ class jet_data_generator(object):
         #print("squeeze",np.squeeze(np.array(arr)).shape, np.squeeze(np.array(zlist)).shape, np.squeeze(np.array(thetalist)).shape)
         return np.array(showered_list),np.array(all_particles_list)
     
-    def generate_dataset(self, nevent):
+    def generate_dataset(self, nevent,verbose = False):
+        self.verbose = verbose
 
         #output = torch.FloatTensor([])
         
@@ -824,20 +849,25 @@ class jet_data_generator(object):
 #         data_theta = []
 #         data_particles = []
         
-        
+        i =0 
         if self.doMultiprocess:
             pool = Pool(processes=self.ncore)
             data, data_z, data_theta  = zip(*pool.map(self.shower,range(nevent)))
 
         else:
-            for i in range(nevent):
+            while i < nevent:
                 adj = 2*int(np.random.normal(0, int(0.1*base_n_particle)))
                 self.nparticle = base_n_particle + adj
                 if i % 10 == 0:
                     print("event :",i)
-                arr_particles, shower_particles = self.shower(i)    
-                data_particles[i] = arr_particles
-                data_shower_particles[i] = shower_particles
+                try:
+                    arr_particles, shower_particles = self.shower(i)    
+                    data_particles[i] = arr_particles
+                    data_shower_particles[i] = shower_particles
+                    i += 1
+                except:
+                    print("Error in event :",i)
+                    
          
         
         #return output
